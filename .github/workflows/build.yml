@@ -1,0 +1,114 @@
+name: Build and Release sing-box
+
+permissions:
+  contents: write
+
+env:
+  TAG_DEFAULT: with_gvisor,with_reality_server,with_quic,with_utls,with_ech,with_dhcp,with_wireguard,with_acme,with_clash_api
+  TAG_ALL: with_gvisor,with_reality_server,with_quic,with_utls,with_ech,with_dhcp,with_wireguard,with_acme,with_clash_api,with_v2ray_api,with_grpc
+
+on:
+  workflow_dispatch:
+    inputs:
+      sing_version:
+        description: "sing-box version to build (e.g., v1.11.4 or 'dev-next')"
+        required: true
+        default: "dev-next"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ^1.23
+          cache: true
+
+      - name: Clone sing-box repository
+        run: |
+          git clone -b ${{ github.event.inputs.sing_version }} https://github.com/SagerNet/sing-box || { echo "Failed to clone specified version"; exit 1; }
+          cd sing-box
+          ACTUAL_VERSION=$(go run ./cmd/internal/read_tag)
+          echo "ACTUAL_VERSION=${ACTUAL_VERSION}" >> $GITHUB_ENV
+          echo "Using version: ${ACTUAL_VERSION}"
+          cd ..
+
+      - name: Build Matrix
+        id: build-matrix
+        run: |
+          mkdir -p builds
+          cd sing-box
+
+          declare -A configs=(
+            ["linux"]="CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOAMD64=v1"
+            ["linux-cgo"]="CGO_ENABLED=1 GOOS=linux GOARCH=amd64 GOAMD64=v1"
+            ["windows"]="CGO_ENABLED=0 GOOS=windows GOARCH=amd64 GOAMD64=v1"
+            ["windows-cgo"]="CGO_ENABLED=1 GOOS=windows GOARCH=amd64 GOAMD64=v1"
+          )
+
+          declare -A tags=(
+            ["default"]="${{ env.TAG_DEFAULT }}"
+            ["all"]="${{ env.TAG_ALL }}"
+          )
+
+          for platform in "${!configs[@]}"; do
+            for tag_type in "${!tags[@]}"; do
+              echo "Building sing-box ${platform} with ${tag_type} tags"
+              ext=""
+              if [[ $platform == *"windows"* ]]; then
+                ext=".exe"
+              fi
+              output_name="sing-box-${platform}"
+              if [[ $tag_type == "all" ]]; then
+                output_name="${output_name}-all"
+              fi
+              env ${configs[$platform]} go build \
+                -tags "${tags[$tag_type]}" \
+                -v -o "../builds/${output_name}${ext}" \
+                -trimpath \
+                -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=${{ env.ACTUAL_VERSION }}' -s -w -buildid=" \
+                ./cmd/sing-box
+              if [ $? -ne 0 ]; then
+                echo "::error::Build failed for ${platform} with ${tag_type} tags"
+                exit 1
+              fi
+            done
+          done
+
+      - name: Create release notes
+        run: |
+          cat > release_notes.md << EOF
+          # sing-box ${{ env.ACTUAL_VERSION }}
+
+          Automated build of sing-box ${{ env.ACTUAL_VERSION }}
+
+          ## Build Variants
+
+          - **Default builds**: Files without "all" or "cgo" in their name use the default feature set.
+          - **All builds**: Files with "all" in their name include all features enabled.
+          - **CGO builds**: Files with "cgo" in their name are built with CGO-enabled features.
+
+          ## Build Features
+
+          - **Default tag includes**: ${{ env.TAG_DEFAULT }}
+          - **All tag includes**: ${{ env.TAG_ALL }}
+          EOF
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sing-box-builds
+          path: builds/
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.ACTUAL_VERSION }}-build
+          name: sing-box ${{ env.ACTUAL_VERSION }} Build
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: |
+            builds/*
