@@ -4,8 +4,8 @@ permissions:
   contents: write
 
 env:
-  TAG_DEFAULT: with_gvisor,with_reality_server,with_quic,with_utls,with_ech,with_dhcp,with_wireguard,with_acme,with_clash_api
-  TAG_ALL: with_gvisor,with_reality_server,with_quic,with_utls,with_ech,with_dhcp,with_wireguard,with_acme,with_clash_api,with_v2ray_api,with_grpc
+  TAG_DEFAULT: with_quic,with_dhcp,with_wireguard,with_utls,with_reality_server,with_acme,with_clash_api,with_gvisor,with_tailscale
+  TAG_ALL: with_quic,with_dhcp,with_wireguard,with_utls,with_reality_server,with_acme,with_clash_api,with_gvisor,with_tailscale,with_v2ray_api,with_grpc
 
 on:
   workflow_dispatch:
